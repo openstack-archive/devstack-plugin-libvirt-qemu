@@ -1,0 +1,223 @@
+#!/bin/bash
+#
+# common functions for devstack-libvirt-qemu plugin
+# -------------------------------------
+
+#
+# ovs installation
+#
+
+#
+# git_update_repo
+# Due to missing support in devstack, this local function can handle
+# updating / refreshing repos based on commit id
+# it's taking following arguments
+# $1 .. path to repo, $2 .. commit/tag for update of existing repo
+#
+function git_update_repo {
+    local git_dest=$1
+    local git_ref=$2
+
+    pushd $git_dest
+    git fetch
+    git checkout -f $git_ref # Clean modified tracked files
+    git clean -d -f # Clean untracked files
+    popd
+}
+
+function clone_repo {
+    local git_remote=$1
+    local git_dest=$2
+    local git_ref=$3
+
+    git_timed clone $git_remote $git_dest
+    pushd $git_dest
+    git checkout -f $git_ref # Clean modified tracked files
+    git clean -d -f # Clean untracked files
+    popd
+}
+
+function get_repo {
+    local git_remote=$1
+    local git_ref=$2
+    local git_dest=$3
+
+    if [ ! -d $git_dest ] || [ "$RECLONE" == True ]; then
+        # If directory exists and should be just refreshed
+        # it's not possible to use devstack git_clone with commit's id
+        if [ -d $git_dest} ]; then
+            git_update_repo $git_dest $git_ref
+        else
+            git_clone $git_remote $git_dest $git_ref
+        fi
+    fi
+}
+
+function patch_repo {
+    if [ "$LIBVIRT_PATCHES" != "" ]; then
+        # $1 destination, $2 commit/branch/tag, $3 patch urls (space seperated)
+        pushd  $1
+           git clean -f -x -d
+           git reset --hard $2
+           local patches=( $3 )
+           for url in "${patches[@]}"; do
+               curl $url | patch -p1
+           done
+        popd
+    fi
+
+}
+
+function clone_libvirt_qemu {
+    OFFLINE=$(trueorfalse False OFFLINE)
+    RECLONE=$(trueorfalse False RECLONE)
+    if [[ "$OFFLINE" != True && ( "$RECLONE" == True || ! -e ${LIBVIRT_DIR}/BUILD_COMPLETE ) ]]; then
+        get_repo $LIBVIRT_REPO $LIBVIRT_BRANCH $LIBVIRT_DIR
+        patch_repo $LIBVIRT_REPO $LIBVIRT_BRANCH $LIBVIRT_PATCHES
+        get_repo $QEMU_REPO $QEMU_BRANCH $QEMU_DIR
+        patch_repo $QEMU_REPO $QEMU_BRANCH $QEMU_PATCHES
+    fi
+}
+
+function install_libvirt_src {
+    if [ -e "${LIBVIRT_DIR}/BUILD_COMPLETE" ]; then
+        echo "Libvirt already built."
+        pushd ${LIBVIRT_DIR}
+            sudo make install
+        popd
+        return
+    fi
+    pushd ${LIBVIRT_DIR}
+        ./autogen.sh --system
+        make -j $(nproc) EXTRA_CFLAGS='-fPIC'
+        sudo make install
+        touch ${LIBVIRT_DIR}/BUILD_COMPLETE
+    popd
+}
+
+function install_qemu_src {
+    if [ -e "${QEMU_DIR}/BUILD_COMPLETE" ]; then
+        echo "Qemu already built."
+        pushd ${QEMU_DIR}
+            sudo make install
+        popd
+        return
+    fi
+    pushd ${QEMU_DIR}
+        # FIXME(ralonsoh): libfdt 1.4.2 not present in Ubuntu repositories.
+        git submodule update --init dtc
+        ./configure
+        make -j $(nproc) EXTRA_CFLAGS='-fPIC'
+        sudo make install
+        touch ${QEMU_DIR}/BUILD_COMPLETE
+    popd
+}
+
+function add_repositories {
+    if is_ubuntu; then
+        if ! [[ $(dpkg --get-selections | ag software-properties-common) ]]; then
+            sudo_with_proxies apt-get install -y software-properties-common
+        fi
+        sudo_with_proxies add-apt-repository -s 'deb http://archive.ubuntu.com/ubuntu/ xenial main'
+        sudo_with_proxies apt-get update
+    #else
+        #TODO(ralonsoh): add Red Hat needed repositories.
+    fi
+}
+
+function install_build_deps {
+    if is_ubuntu; then
+        sudo_with_proxies apt-get build-dep -y $1
+    else
+        [ rpm -qa | grep yum-builddep > /dev/null ] && sudo_with_proxies yum install -y yum-builddep
+        sudo_with_proxies yum-builddep -y $1
+    fi
+}
+
+function configure_libvirtd_src {
+    cat << EOF | sudo tee /etc/libvirt/libvirtd.conf
+unix_sock_group = "libvirt"
+unix_sock_ro_perms = "0660"
+unix_sock_rw_perms = "0660"
+unix_sock_admin_perms = "0660"
+EOF
+}
+
+function configure_groups_users {
+    getent group libvirt > /dev/null || sudo addgroup -f -r libvirt
+    sudo usermod -G libvirt -a root
+    getent group kvm > /dev/null || sudo groupadd -f -r kvm
+    getent group qemu > /dev/null || sudo groupadd -f -r qemu
+    getent passwd qemu > /dev/null || sudo useradd -r -g qemu -G kvm -d / -s /sbin/nologin -c "qemu user" qemu
+}
+
+function install_libvirt_qemu_src {
+    # Install deps
+    set +o errexit
+    if is_ubuntu; then
+        if [ dpkg -s libvirt-bin | grep installed > /dev/null ]; then
+            stop_service libvirt-bin
+        fi
+        if [ dpkg -s libvirt0 | grep installed > /dev/null ]; then
+            apt-get remove --purge libvirt0
+        fi
+        add_repositories
+        install_build_deps libvirt-bin
+        install_build_deps qemu-kvm
+		install_package libnuma-dev gcc make build-essential autopoint
+    else
+        if [ rpm -qa | grep libvirtd > /dev/null ]; then
+            stop_service libvirtd
+        fi
+        if [ rpm -qa | grep libvirt0 > /dev/null ]; then
+            yum remove libvirt0
+        fi
+        install_build_deps libvirtd
+        install_build_deps qemu
+        install_package libnuma-devel gcc make autopoint pkg-config
+    fi
+    set -o errexit
+
+    install_libvirt_src
+    install_qemu_src
+    if is_ubuntu; then
+        sudo ln -s -f /usr/lib/systemd/system/libvirtd.service /usr/lib/systemd/system/libvirt-bin.service
+    fi
+    type systemctl 2>&1 >/dev/null && sudo systemctl daemon-reload
+
+    configure_libvirtd_src
+
+    configure_groups_users
+
+    if is_ubuntu; then
+        sudo apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd || /bin/true
+        start_service libvirt-bin
+    else
+        #TODO(ralonsoh): check if Red Hat needs selinux permissive mode
+        start_service libvirtd
+    fi
+    start_service virtlogd
+    sudo_with_proxies pip install -U libvirt-python
+}
+
+function cleanup_libvirt_qemu_source {
+    sudo rm -rf ${LIBVIRT_DIR}
+    sudo rm -rf ${QEMU_DIR}
+}
+
+function uninstall_libvirt_qemu {
+    pushd ${LIBVIRT_DIR}
+        sudo make uninstall
+    popd
+    pushd ${QEMU_DIR}
+        sudo make uninstall
+    popd
+}
+
+
+# if we are installing libvirt and qemu dont install distro packages.
+if [ $LIBVIRT_QEMU_SRC_INSTALL == 'True' ]; then
+function install_libvirt {
+    install_libvirt_qemu_src
+}
+fi
