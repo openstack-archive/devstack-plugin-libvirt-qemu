@@ -1,0 +1,6 @@
+[run]
+branch = True
+source = devstack_plugin_libvirt_qemu
+
+[report]
+ignore_errors = True
