@@ -21,6 +21,7 @@ available to be installed. Check `The libvirt virtualization API python binding
 <https://pypi.python.org/pypi/libvirt-python>`_ to find the list of available
 versions to be installed.
 
-This plugin has been tested manually only in:
+This plugin has been tested manually in:
 
 * Ubuntu 16.04
+* CentOS 7
