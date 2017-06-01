@@ -80,6 +80,8 @@ function clone_libvirt_qemu {
 }
 
 function install_libvirt_src {
+    uninstall_package libvirt*
+
     if [ -e "${LIBVIRT_DIR}/BUILD_COMPLETE" ]; then
         echo "Libvirt already built."
         pushd ${LIBVIRT_DIR}
@@ -115,13 +117,21 @@ function install_qemu_src {
 
 function add_repositories {
     if is_ubuntu; then
-        if ! [[ $(dpkg --get-selections | ag software-properties-common) ]]; then
+        if ! [[ $(dpkg --get-selections | grep software-properties-common) ]]; then
             sudo_with_proxies apt-get install -y software-properties-common
         fi
         sudo_with_proxies add-apt-repository -s 'deb http://archive.ubuntu.com/ubuntu/ xenial main'
-        sudo_with_proxies apt-get update
-    #else
-        #TODO(ralonsoh): add Red Hat needed repositories.
+        sudo_with_proxies apt-get update || /bin/true
+    else
+        if ! [[ $(yum repolist | grep ftp.pbone.net_mirror_ftp.centos.org_7_os_x86_64_) ]]; then
+            sudo_with_proxies yum-config-manager --add-repo ftp://ftp.pbone.net/mirror/ftp.centos.org/7/os/x86_64/
+            sudo_with_proxies yum-config-manager --enable ftp.pbone.net_mirror_ftp.centos.org_7_os_x86_64_
+        fi
+        if ! [[ $(yum repolist | grep ftp.pbone.net_mirror_ftp5.gwdg.de_pub_opensuse_repositories_utilities_CentOS_6_) ]]; then
+            sudo_with_proxies yum-config-manager --add-repo ftp://ftp.pbone.net/mirror/ftp5.gwdg.de/pub/opensuse/repositories/utilities/CentOS_6/
+            sudo_with_proxies yum-config-manager --enable ftp.pbone.net_mirror_ftp5.gwdg.de_pub_opensuse_repositories_utilities_CentOS_6_
+        fi
+        sudo_with_proxies yum update -y || /bin/true
     fi
 }
 
@@ -164,7 +174,7 @@ function install_libvirt_qemu_src {
         add_repositories
         install_build_deps libvirt-bin
         install_build_deps qemu-kvm
-		install_package libnuma-dev gcc make build-essential autopoint
+        install_package libnuma-dev gcc make build-essential autopoint
     else
         if [ rpm -qa | grep libvirtd > /dev/null ]; then
             stop_service libvirtd
@@ -172,9 +182,9 @@ function install_libvirt_qemu_src {
         if [ rpm -qa | grep libvirt0 > /dev/null ]; then
             yum remove libvirt0
         fi
-        install_build_deps libvirtd
+        install_build_deps libvirt
         install_build_deps qemu
-        install_package libnuma-devel gcc make autopoint pkg-config
+        install_package libnuma-devel gcc make gettext-devel pkgconfig
     fi
     set -o errexit
 
@@ -193,7 +203,6 @@ function install_libvirt_qemu_src {
         sudo apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd || /bin/true
         start_service libvirt-bin
     else
-        #TODO(ralonsoh): check if Red Hat needs selinux permissive mode
         start_service libvirtd
     fi
     start_service virtlogd
@@ -205,7 +214,18 @@ function cleanup_libvirt_qemu_source {
     sudo rm -rf ${QEMU_DIR}
 }
 
+function _remove_old_libraries {
+    if test -d /usr/lib64; then
+        libdir=/usr/lib64
+    else
+        libdir=/usr/lib
+    fi
+    sudo rm -rf ${libdir}/libvirt*
+}
+
 function uninstall_libvirt_qemu {
+    _remove_old_libraries
+
     pushd ${LIBVIRT_DIR}
         sudo make uninstall
     popd
