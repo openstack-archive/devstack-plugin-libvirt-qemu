@@ -1,6 +1,6 @@
-===============================
+============================
 devstack-plugin-libvirt-qemu
-===============================
+============================
 
 OpenStack Boilerplate contains all the boilerplate you need to create an OpenStack package.
 
