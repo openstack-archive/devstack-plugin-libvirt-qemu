@@ -146,7 +146,7 @@ function install_build_deps {
 
 function configure_libvirtd_src {
     cat << EOF | sudo tee /etc/libvirt/libvirtd.conf
-unix_sock_group = "libvirt"
+unix_sock_group = "$LIBVIRT_GROUP"
 unix_sock_ro_perms = "0660"
 unix_sock_rw_perms = "0660"
 unix_sock_admin_perms = "0660"
@@ -184,7 +184,7 @@ function install_libvirt_qemu_src {
         fi
         install_build_deps libvirt
         install_build_deps qemu
-        install_package libnuma-devel gcc make gettext-devel pkgconfig
+        install_package gcc make gettext-devel pkgconfig libaio-devel libcap-devel libiscsi-devel
     fi
     set -o errexit
 
