@@ -174,7 +174,7 @@ function install_libvirt_qemu_src {
         add_repositories
         install_build_deps libvirt-bin
         install_build_deps qemu-kvm
-        install_package libnuma-dev gcc make build-essential autopoint
+        install_package gcc make build-essential autopoint
     else
         if [ rpm -qa | grep libvirtd > /dev/null ]; then
             stop_service libvirtd
@@ -184,7 +184,7 @@ function install_libvirt_qemu_src {
         fi
         install_build_deps libvirt
         install_build_deps qemu
-        install_package libnuma-devel gcc make gettext-devel pkgconfig
+        install_package gcc make gettext-devel pkgconfig libaio-devel libcap-devel libiscsi-devel
     fi
     set -o errexit
 
