@@ -184,7 +184,7 @@ function install_libvirt_qemu_src {
         fi
         install_build_deps libvirt
         install_build_deps qemu
-        install_package libnuma-devel gcc make gettext-devel pkgconfig
+        install_package gcc make gettext-devel pkgconfig libaio-devel libcap-devel libiscsi-devel
     fi
     set -o errexit
 
